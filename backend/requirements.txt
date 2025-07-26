@@ -1,0 +1,16 @@
+fastapi==0.116.1
+uvicorn==0.35.0
+motor==3.7.1
+pymongo==4.13.2
+cloudinary==1.44.1
+python-dotenv==1.1.1
+firebase-admin==7.0.0
+python-multipart==0.0.20
+Pillow
+
+# DeepFace + RetinaFace compatible stack
+tensorflow==2.15.0
+tf-keras==2.15.0
+keras==2.15.0
+deepface==0.0.92
+retina-face==0.0.14
