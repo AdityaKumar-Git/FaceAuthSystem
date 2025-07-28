@@ -1,4 +1,4 @@
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Body
 from fastapi.middleware.cors import CORSMiddleware
 from db import get_database
 from cloudinary_utils import upload_image
@@ -6,10 +6,16 @@ from models import FACES_COLLECTION, LOGS_COLLECTION
 from image_utils import preprocess_image, get_image_info
 from deepface import DeepFace
 import numpy as np
+import cv2
+import mediapipe as mp
+import base64
+from io import BytesIO
+from PIL import Image
 import tempfile
 import shutil
 
 app = FastAPI()
+
 
 # Allow CORS for local frontend
 app.add_middleware(
@@ -20,35 +26,47 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-@app.post("/api/test-face")
-async def test_face(image: UploadFile = File(...)):
-    """Test endpoint to verify DeepFace is working without MongoDB"""
-    # Preprocess image
-    processed_path = preprocess_image(image.file, max_size=512, quality=85)
-    image_info = get_image_info(processed_path)
-    print(f"Image info: {image_info}")
-    
-    try:
-        result = DeepFace.represent(
-            img_path=processed_path,
-            model_name="ArcFace",
-            detector_backend="mtcnn",
-            enforce_detection=True
-        )
-        if result and len(result) > 0:
-            embedding_length = len(result[0]["embedding"])
-            return {"message": f"Face detected! Embedding length: {embedding_length}", "image_info": image_info}
-        else:
-            return {"message": "No face detected", "image_info": image_info}
-    except Exception as e:
-        return {"error": str(e), "image_info": image_info}
-    finally:
-        image.file.close()
-        try:
-            import os
-            os.remove(processed_path)
-        except Exception:
-            pass
+
+mp_face_mesh = mp.solutions.face_mesh
+
+def calculate_ear(landmarks):
+    # EAR = (||p2 - p6|| + ||p3 - p5||) / (2 * ||p1 - p4||)
+    def euclidean(p1, p2):
+        return np.linalg.norm(np.array(p1) - np.array(p2))
+
+    # Eye landmark indices (left eye)
+    left_eye_idx = [33, 160, 158, 133, 153, 144]
+    coords = [(landmarks[idx].x, landmarks[idx].y) for idx in left_eye_idx]
+
+    ear = (euclidean(coords[1], coords[5]) + euclidean(coords[2], coords[4])) / (2.0 * euclidean(coords[0], coords[3]))
+    return ear
+
+@app.post("/api/blink-detect")
+async def blink_detect(frames: list[str] = Body(...)):
+    """
+    Expects a list of base64-encoded images from the frontend.
+    Returns True if blink detected between frames.
+    """
+    EAR_THRESHOLD = 0.22
+    frame_ears = []
+
+    with mp_face_mesh.FaceMesh(refine_landmarks=True) as face_mesh:
+        for frame_b64 in frames:
+            img_data = base64.b64decode(frame_b64.split(",")[1])
+            img = Image.open(BytesIO(img_data)).convert("RGB")
+            img_np = np.array(img)
+            results = face_mesh.process(cv2.cvtColor(img_np, cv2.COLOR_RGB2BGR))
+            if results.multi_face_landmarks:
+                landmarks = results.multi_face_landmarks[0].landmark
+                ear = calculate_ear(landmarks)
+                frame_ears.append(ear)
+
+    if len(frame_ears) < 2:
+        return {"blink_detected": False, "ears": frame_ears}
+
+    # Blink if EAR drops below threshold in any frame
+    blink_detected = any(ear < EAR_THRESHOLD for ear in frame_ears)
+    return {"blink_detected": blink_detected, "ears": frame_ears}
 
 @app.post("/api/verify")
 async def verify(image: UploadFile = File(...), timestamp: str = Form(...)):
@@ -86,7 +104,7 @@ async def verify(image: UploadFile = File(...), timestamp: str = Form(...)):
                 matched_person = face["personId"]
         
         # ArcFace with cosine similarity: threshold around 0.3-0.4
-        THRESHOLD = 0.35
+        THRESHOLD = 0.4
         print(f"Min distance: {min_dist}, Threshold: {THRESHOLD}")
         
         if min_dist < THRESHOLD:

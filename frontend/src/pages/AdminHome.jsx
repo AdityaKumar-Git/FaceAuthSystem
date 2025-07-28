@@ -22,7 +22,7 @@ export default function AdminHome() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!personId || !image) {
-      setResponse('Please provide both Person ID and an image.');
+      setResponse('Please provide all details and an Image.');
       return;
     }
     setLoading(true);

@@ -4,26 +4,60 @@ import { Link } from 'react-router-dom';
 
 export default function UserHome() {
   const webcamRef = useRef(null);
-  const [imgSrc, setImgSrc] = useState(null);
   const [response, setResponse] = useState('');
   const [loading, setLoading] = useState(false);
 
-  const capture = () => {
-    const imageSrc = webcamRef.current.getScreenshot();
-    setImgSrc(imageSrc);
+  // Capture frames for blink detection
+  const checkBlinkOnce = async () => {
+    const frames = [];
+    for (let i = 0; i < 5; i++) {
+      frames.push(webcamRef.current.getScreenshot());
+      await new Promise(r => setTimeout(r, 200)); // capture every 200ms
+    }
+
+    const res = await fetch('http://127.0.0.1:8000/api/blink-detect', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(frames),
+    });
+    const data = await res.json();
+    return data.blink_detected;
   };
 
-  const handleVerify = async () => {
-    if (!imgSrc) return;
+  const checkBlinkWithRetries = async (retries = 3) => {
+    for (let attempt = 1; attempt <= retries; attempt++) {
+      setResponse(`Checking for blink... (Attempt ${attempt}/${retries})`);
+      const blinked = await checkBlinkOnce();
+      if (blinked) return true;
+      // wait a short time before retrying to allow user to blink
+      await new Promise(r => setTimeout(r, 500));
+    }
+    return false;
+  };
+
+  const handleVerifyWithBlink = async () => {
+    if (!webcamRef.current) return;
     setLoading(true);
-    setResponse('');
+    setResponse('Starting blink detection...');
+
     try {
-      const blob = await (await fetch(imgSrc)).blob();
+      const blinked = await checkBlinkWithRetries(3);
+
+      if (!blinked) {
+        setResponse('No blink detected after multiple attempts ❌. Please try again.');
+        setLoading(false);
+        return;
+      }
+
+      setResponse('Blink detected ✅. Capturing image and verifying...');
+
+      // Auto capture a frame for verification
+      const imageSrc = webcamRef.current.getScreenshot();
+      const blob = await (await fetch(imageSrc)).blob();
       const formData = new FormData();
       formData.append('image', blob, 'capture.png');
       formData.append('timestamp', new Date().toISOString());
-      
-      // Note for me: Replace the URL below with backend endpoint
+
       const res = await fetch('http://127.0.0.1:8000/api/verify', {
         method: 'POST',
         body: formData,
@@ -54,25 +88,17 @@ export default function UserHome() {
           className="rounded mb-4 w-full"
         />
         <button
-          onClick={capture}
-          className="mb-4 bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600"
-        >
-          Capture
-        </button>
-        {imgSrc && (
-          <img src={imgSrc} alt="Captured" className="mb-4 rounded w-full" />
-        )}
-        <button
-          onClick={handleVerify}
+          onClick={handleVerifyWithBlink}
           className="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700 disabled:opacity-50"
-          disabled={!imgSrc || loading}
+          disabled={loading}
         >
-          {loading ? 'Verifying...' : 'Verify'}
+          {loading ? 'Processing...' : 'Verify (with Blink)'}
         </button>
+
         {response && (
           <div className="mt-4 text-center text-lg font-semibold text-gray-700">{response}</div>
         )}
       </div>
     </div>
   );
-} 
+}
