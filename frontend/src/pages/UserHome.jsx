@@ -1,20 +1,19 @@
 import { useRef, useState } from 'react';
 import Webcam from 'react-webcam';
 import { Link } from 'react-router-dom';
+import { motion } from 'framer-motion';
 
 export default function UserHome() {
   const webcamRef = useRef(null);
   const [response, setResponse] = useState('');
   const [loading, setLoading] = useState(false);
 
-  // Capture frames for blink detection
   const checkBlinkOnce = async () => {
     const frames = [];
     for (let i = 0; i < 5; i++) {
       frames.push(webcamRef.current.getScreenshot());
-      await new Promise(r => setTimeout(r, 200)); // capture every 200ms
+      await new Promise(r => setTimeout(r, 200));
     }
-
     const res = await fetch('http://127.0.0.1:8000/api/blink-detect', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -26,10 +25,9 @@ export default function UserHome() {
 
   const checkBlinkWithRetries = async (retries = 3) => {
     for (let attempt = 1; attempt <= retries; attempt++) {
-      setResponse(`Checking for blink... (Attempt ${attempt}/${retries})`);
+      setResponse(`👀 Checking for blink... (Attempt ${attempt}/${retries})`);
       const blinked = await checkBlinkOnce();
       if (blinked) return true;
-      // wait a short time before retrying to allow user to blink
       await new Promise(r => setTimeout(r, 500));
     }
     return false;
@@ -38,20 +36,19 @@ export default function UserHome() {
   const handleVerifyWithBlink = async () => {
     if (!webcamRef.current) return;
     setLoading(true);
-    setResponse('Starting blink detection...');
+    setResponse('🔄 Starting blink detection...');
 
     try {
       const blinked = await checkBlinkWithRetries(3);
 
       if (!blinked) {
-        setResponse('No blink detected after multiple attempts ❌. Please try again.');
+        setResponse('❌ No blink detected. Please try again.');
         setLoading(false);
         return;
       }
 
-      setResponse('Blink detected ✅. Capturing image and verifying...');
+      setResponse('✅ Blink detected! Capturing image...');
 
-      // Auto capture a frame for verification
       const imageSrc = webcamRef.current.getScreenshot();
       const blob = await (await fetch(imageSrc)).blob();
       const formData = new FormData();
@@ -65,40 +62,55 @@ export default function UserHome() {
       const data = await res.json();
       setResponse(data.message || JSON.stringify(data));
     } catch (err) {
-      setResponse('Verification failed.');
+      setResponse('⚠️ Verification failed.');
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="flex flex-col items-center justify-center min-h-screen bg-gray-100 relative">
-      <Link
-        to="/login"
-        className="absolute top-4 right-4 bg-gray-300 text-gray-800 px-4 py-2 rounded hover:bg-gray-400"
+    <div className="flex flex-col items-center justify-center min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-black relative overflow-hidden">
+      {/* Decorative blurred background */}
+      <div className="absolute inset-0 bg-[url('/bg-pattern.svg')] opacity-10" />
+
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="backdrop-blur-lg bg-white/10 border border-white/20 p-8 rounded-2xl shadow-2xl w-full max-w-md flex flex-col items-center"
       >
-        Admin Login
-      </Link>
-      <div className="bg-white p-8 rounded shadow w-full max-w-md flex flex-col items-center">
-        <h2 className="text-2xl font-bold mb-6">User Home</h2>
+        <h2 className="text-3xl font-bold text-white mb-6">User Verification</h2>
         <Webcam
           audio={false}
           ref={webcamRef}
           screenshotFormat="image/png"
-          className="rounded mb-4 w-full"
+          className="rounded-xl mb-4 w-full border-4 border-white/20 shadow-lg"
         />
+
         <button
           onClick={handleVerifyWithBlink}
-          className="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700 disabled:opacity-50"
+          className="bg-green-500 text-white px-6 py-2 rounded-lg hover:bg-green-600 active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
           disabled={loading}
         >
-          {loading ? 'Processing...' : 'Verify (with Blink)'}
+          {loading ? (
+            <div className="flex items-center gap-2">
+              <span className="animate-spin border-2 border-white border-t-transparent rounded-full w-4 h-4"></span>
+              Processing...
+            </div>
+          ) : (
+            'Verify with Blink'
+          )}
         </button>
 
         {response && (
-          <div className="mt-4 text-center text-lg font-semibold text-gray-700">{response}</div>
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            className="mt-4 text-center text-lg font-semibold text-gray-200"
+          >
+            {response}
+          </motion.div>
         )}
-      </div>
+      </motion.div>
     </div>
   );
 }
